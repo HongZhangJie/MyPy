@@ -1,0 +1,202 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+# update_time : 20250521 for u
+
+import os
+import sys
+import json
+import base64
+import requests
+import time
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+DEBUG = False
+
+
+"""
+/etc/shterm/shterm.conf中新增配置
+send_msg_url=http://10.8.223.125
+sms_secert=800901
+prefix=【测试环境】
+
+在/etc/shterm/shterm.conf种增加开启soap参数，并重启tomcat 
+message.soap.enable=true
+
+sms_soap文件上传至后台
+cp -a sms_soap /usr/libexec/shterm/
+chmod 755 /usr/libexec/shterm/sms_soap
+
+# 默认参数与值写入/etc/shterm/shterm.conf中，指定参数名如下
+# 参数说明：
+send_msg_url=http://10.8.223.125. 短信平台地址及端口
+sms_secert=800901.对应SECRET base64编码：必传
+prefix=【测试环境】:开头，可选
+msg_verify_code_msg_template 验证码短信模板【可选】，如堡垒机验证码为 {code}，请妥善保管 ==>支持传入 {code} 参数，进行替换 （可选，不传则为左边示例内容）
+"""
+
+
+# 从shterm.conf获取配置
+def get_config_value(config_file, key_word):
+    """获取配置文件中的值"""
+    cmd = "cat {0} | grep {1} | awk -F '=' '{{print $2}}'".format(config_file, key_word)
+    return os.popen(cmd).read().strip()
+
+def get_sms_config():
+    config_file = "/etc/shterm/shterm.conf"
+    key_words = {
+        'send_msg_url': "send_msg_url",
+        'sms_secert' : "sms_secert",
+        'prefix': "prefix",
+        'msg_verify_code_msg_template': "msg_verify_code_msg_template"
+    }
+    settings = {}
+    try:
+        for key, key_word in key_words.items():
+            settings[key] = get_config_value(config_file, key_word)
+            
+    except Exception as e:
+        raise Exception("从配置文件 {0} 中获取sms配置参数时时发生异常，详情为 {1}".format(config_file, str(e)))
+    return settings
+
+# 通知短信内容
+def set_verify_code_msg(sms_prefix, content, msg_verify_code_msg_template):
+    if msg_verify_code_msg_template == '':
+        msg_verify_code_msg_template = "验证码为 {code}，请勿向他人泄露, 1分钟内有效。"
+    verify_code_msg = msg_verify_code_msg_template.replace("{code}", content)
+    sms_verify_code_detail = "{0}{1}".format(sms_prefix, verify_code_msg)
+    return sms_verify_code_detail
+
+# 普通通知短信内容
+def set_normal_msg(sms_prefix,content):
+    sms_normal_detail = "{0}{1}".format(sms_prefix,content)
+    return sms_normal_detail
+
+# 重试机制
+def retry_request(request_func, max_retries, delay, *args, **kwargs):
+    """
+    参数:
+    - request_func: 实际发送请求的函数
+    - max_retries: 最大重试次数
+    - delay: 每次重试之间的间隔时间（秒）
+    - *args, **kwargs: 请求函数的参数
+    """
+    retries = 0
+    while retries < max_retries:
+        try:
+            response = request_func(*args, **kwargs)
+            if DEBUG:
+                print 'DEBUG response data: {}'.format(response.text)
+                
+            if response.status_code == 200:
+                response_data = response.json()
+                if DEBUG:
+                    print 'DEBUG response JSON: {}'.format(response_data)
+                    
+                if int(response_data['code']) == int(0):
+                    return response_data
+                else:
+                    raise Exception(response_data['msg'])
+            else:
+                raise Exception("HTTP error: {}".format(response.status_code))
+        except Exception as e:
+            print '请求失败：{}，重试 {}/{}'.format(e, retries + 1, max_retries)
+            retries += 1
+            if retries < max_retries:
+                time.sleep(delay)  # 重试之前的延迟
+            else:
+                raise Exception("请求失败，已达到最大重试次数: {}".format(max_retries))
+    return Exception("未知错误，未能成功执行请求函数")
+
+
+# 发送短信
+def send_message_api(send_msg_url, app_token, phonenumber, content, max_retries=3, delay=1):
+    header= {"Content-Type": "application/json", "Accept": "application/json", "Authorization": app_token}
+    bodys = {
+        "batchName": "verifyCode",
+        "items": [{"to": phonenumber}],
+        "msgType": "sms",
+        "content": content
+    }
+    
+    def send_request():
+        response = requests.post(send_msg_url, data=json.dumps(bodys), headers=header, timeout=5)
+        if DEBUG:
+            print 'DEBUG response data: {}'.format(response.text)
+        return response
+    
+    return retry_request(send_request, max_retries, delay)
+
+# 主要函数，实现整个流程
+def send_message(mobile, content, max_retries=3, delay=1):
+    try:
+        settings = get_sms_config()
+        send_msg_url = settings['send_msg_url']
+        sms_secert = settings['sms_secert']
+        prefix = settings['prefix']
+        msg_verify_code_msg_template = settings['msg_verify_code_msg_template']
+        
+        if not all([send_msg_url, sms_secert]):
+            msg = "The following parameters are not configured in /etc/shterm/shterm.conf. Please check: send_msg_url sms_secert."
+            raise Exception(msg)
+
+        if len(content) == 6 and content.isdigit():
+            content = set_verify_code_msg(sms_prefix=prefix, content=content, msg_verify_code_msg_template=msg_verify_code_msg_template)
+        elif content.startswith("$SHTERM_USER_TOTP"):
+            content = set_temp_passwd_msg(sms_prefix=prefix,content=content,msg_temp_passwd_msg_template=msg_temp_passwd_msg_template)
+        else:
+            content = set_normal_msg(sms_prefix=prefix,content=content)
+
+        send_message_api(send_msg_url, sms_secert, mobile, content, max_retries, delay)
+        return {"result": "success"}
+
+    except Exception as e:
+        return {"result": "failure", "msg": str(e)}
+
+# 传参
+class SMSRestfulAPI(object):
+    def __init__(self, config):
+        global DEBUG
+        config = base64.b64decode(config)
+        config = json.loads(config)
+        
+        self.mobile = config.get('mobile', None)
+        assert self.mobile, "mobile not found"
+ 
+        self.content = config.get('content', None)
+        assert self.content, "Content not found."
+ 
+        encoding = config.get('encoding', None)
+        if encoding:
+            self.content = self.content.encode(encoding, 'replace')
+        self.encoding = encoding
+ 
+        if config.get('DEBUG'):
+            DEBUG = True
+ 	# 发送调用
+    def send(self):
+        res = send_message(self.mobile, self.content)
+ 
+        if DEBUG:
+            print 'DEBUG response data: {}'.format(res)
+ 
+        if res['result'] != 'success':
+            print res['msg']
+            sys.exit(1)
+
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        s = SMSRestfulAPI(sys.argv[1])
+    else:
+        config = {
+            "mobile": 13764522477,
+            "content": "hello",
+            #'content': '$SHTERM_USER_TOTP:f6155403-d1ed-4503-88c4-9cd230078e79'
+            "message": "xxxxhello",
+            "DEBUG": True,
+            "charset": "UTF-8"
+        }
+        config = base64.b64encode(json.dumps(config))
+        s = SMSRestfulAPI(config)
+    s.send()
+   
