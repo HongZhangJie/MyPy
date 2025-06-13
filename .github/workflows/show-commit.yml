@@ -1,0 +1,19 @@
+name: 显示提交信息
+
+on: [push]
+
+jobs:
+  print-info:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 显示提交信息
+        run: |
+          echo "=============================="
+          echo "🧑 提交者：${{ github.actor }}"
+          echo "🌿 分支：${{ github.ref }}"
+          echo "💬 提交信息：${{ github.event.head_commit.message }}"
+          echo "=============================="
