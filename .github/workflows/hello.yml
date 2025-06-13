@@ -1,0 +1,14 @@
+name: Hello Workflow
+
+on: [push]  # 每次 push 到 GitHub 就触发
+
+jobs:
+  hello-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 源代码
+        uses: actions/checkout@v4
+
+      - name: 输出欢迎信息
+        run: echo "👋 Hello GitHub Actions!"
