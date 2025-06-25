@@ -1,0 +1,22 @@
+name: 部署到 GitHub Pages
+
+on:
+  push:
+    branches:
+      - master  # 或 main，看你默认分支
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传到 GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .  # 当前目录中包含 index.html
