@@ -1,0 +1,168 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import json
+import base64
+import urllib
+import urllib2
+import cookielib
+import re
+import ssl
+
+DEBUG = False
+
+
+def http_get(url, debug=False, **kargs):
+    if kargs: url += '?' + urllib.urlencode(kargs)
+    if debug:
+        print 'DEBUG get url: %s' % url
+        print 'DEBUG data: %s' % urllib.urlencode(kargs)
+
+    if url.startswith("https://"):
+        context = ssl._create_unverified_context()
+        handler = urllib2.HTTPSHandler(context=context)
+        opener = urllib2.build_opener(handler, urllib2.HTTPCookieProcessor(cookielib.CookieJar()))
+    else:
+        procs = [urllib2.HTTPCookieProcessor(cookielib.CookieJar()), ]
+        opener = urllib2.build_opener(*procs)
+
+    req = urllib2.Request(url)
+
+    try:
+        res = opener.open(req, timeout=10)
+    except Exception, e:
+        if debug: print >> sys.stderr, 'DEBUG error: ' + str(vars(e))
+        return ''
+
+    return res.read()
+
+
+def http_post(url, debug=False, param_type='application/x-www-form-urlencoded', charset='UTF-8', **kargs):
+    content_type = param_type
+    data = []
+    if param_type == 'application/x-www-form-urlencoded':
+        data = urllib.urlencode(kargs)
+
+    if param_type == 'application/json':
+        body = json.dumps(kargs)
+        data = bytes(body)
+        content_type = param_type + ';charset=' + charset
+
+    if url.startswith("https://"):
+        context = ssl._create_unverified_context()
+        handler = urllib2.HTTPSHandler(context=context)
+        opener = urllib2.build_opener(handler, urllib2.HTTPCookieProcessor(cookielib.CookieJar()))
+    else:
+        procs = [urllib2.HTTPCookieProcessor(cookielib.CookieJar()), ]
+        opener = urllib2.build_opener(*procs)
+
+    req = urllib2.Request(url, data)
+    req.add_header('Content-Type', content_type)
+
+    try:
+        res = opener.open(req, timeout=10)
+    except Exception, e:
+        if debug: print >> sys.stderr, 'DEBUG error: ' + str(vars(e))
+        return ''
+
+    return res.read()
+
+def convert_to_str(value,encoding):
+    if isinstance(value, unicode):
+        return value.encode(encoding)
+    elif isinstance(value, str):
+        return value
+    elif isinstance(value, int):
+        return str(value)
+    elif isinstance(value, bool):
+        return 'True' if value else 'False'
+    elif isinstance(value, datetime):
+        return value.isoformat().encode(encoding)
+    else:
+        raise ValueError("Unsupported type by convert_to_str")
+
+class SMSRestfulAPI(object):
+    def __init__(self, config):
+        global DEBUG
+
+        config = base64.b64decode(config)
+        config = json.loads(config)
+
+        self.url = config.get('url', None)
+        assert self.url, "Url not found."
+
+        self.args = config.get('args', None)
+        assert self.url, "Args not found."
+
+        self.mobile = config.get('mobile', '')
+
+        self.content = config.get('content', '')
+        assert self.content, "Content not found."
+
+        self.loginName = config.get('loginName', '')
+
+        encoding = config.get('encoding', None)
+        if encoding: self.content = self.content.encode(encoding, 'replace')
+        self.encoding = encoding
+
+        self.method = config.get('method', 'GET').upper()
+
+        self.param_type = config.get('paramType', None)
+
+        if config.get('DEBUG'): DEBUG = True
+
+        if self.args.find("hex=true") >= 0:
+            self.content = self.content.encode('HEX')
+
+        #set user ext info params into self
+        for key, value in config.items():
+            if key not in ['url','args','mobile','content','loginName','encoding','method','paramType','DEBUG','enabled','paramType']:
+                setattr(self, convert_to_str(key,self.encoding), value)
+
+    def send(self):
+        args = {}
+        self_args_str = self.args.encode(self.encoding)
+        if self.param_type == 'application/json':
+            args_json = json.loads(self_args_str)
+            for key, value in args_json.items():
+                if key == 'hex':
+                    pass
+                else:
+                    for key2, value2 in self.__dict__.items():
+                        #base params don't need to replace
+                        if key2 not in ['url','args','encoding','method','DEBUG','param_type']:
+                            value = convert_to_str(value,self.encoding)
+                            replaceFrom = '<%'+key2+'%>'
+                            replaceTo = convert_to_str(value2,self.encoding)
+                            value = value.replace(replaceFrom, replaceTo)
+                    args[key] = value
+        else:
+            for key, value in self.__dict__.items():
+                        #base params don't need to replace
+                        if key not in ['url','args','encoding','method','DEBUG','param_type']:
+                            self_args_str = self_args_str.replace('<%'+key+'%>', convert_to_str(value,self.encoding))
+            for arg in self_args_str.split(','):
+                key, value = arg.split('=')
+                if key == 'hex':
+                    pass
+                else:
+                    args[key] = value
+
+
+        if self.method == 'GET':
+            res = http_get(self.url, DEBUG, **args)
+        elif self.method == 'POST':
+            res = http_post(self.url, DEBUG, self.param_type, self.encoding, **args)
+
+        if DEBUG: print 'DEBUG response data: %s' % res
+
+        if not res: sys.exit(1)
+
+if __name__ == '__main__':
+    # config={"mobile":13764522477,"content":"hello","DEBUG":True,"charset":"UTF-8","method":"post","url":"http://sendsms.api.xoyo/api/index.php","args":"username=sms,pwd=config,phone=<%mobile%>,message=<%content%>"}
+    # config = base64.b64encode(json.dumps(config))
+    # s = SMSRestfulAPI(config)
+    s = SMSRestfulAPI(sys.argv[1])
+    s.send()

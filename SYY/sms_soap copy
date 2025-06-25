@@ -1,0 +1,201 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+ 
+import sys
+import json
+import base64
+import requests
+from datetime import datetime
+import os
+reload(sys)
+sys.setdefaultencoding('utf-8')
+ 
+# 验证码短信内容  
+def set_verify_code_msg(sms_prefix,content,msg_verify_code_msg_template):
+    if msg_verify_code_msg_template == '':
+        msg_verify_code_msg_template = "齐治堡垒机验证码为 {code}"
+    verify_code_msg = msg_verify_code_msg_template.replace("{code}",content)
+    sms_verify_code_detail = "{0}{1}".format(sms_prefix,verify_code_msg)
+    return sms_verify_code_detail
+ 
+# 普通通知短信内容
+def set_normal_msg(sms_prefix,content):
+    sms_normal_detail = "{0}{1}".format(sms_prefix,content)
+    return sms_normal_detail
+ 
+# 临时密码短信内容 
+def set_temp_passwd_msg(sms_prefix,content,msg_temp_passwd_msg_template):
+    if msg_temp_passwd_msg_template == '':
+        msg_temp_passwd_msg_template = "齐治堡垒机临时登录密码为 {code}，一次性有效，请妥善保管。"
+    temp_passwd_msg = msg_temp_passwd_msg_template.replace("{code}",content)
+    sms_temp_passwd_detail = "{0}{1}".format(sms_prefix,temp_passwd_msg)
+    return sms_temp_passwd_detail
+ 
+"""
+/etc/shterm/shterm.conf中新增配置
+ 
+drc_sms_url=http://10.8.223.125:39089
+drc_sms_service_code=11002000003
+drc_sms_service_scene=02
+drc_sms_service_version=01
+drc_sms_consumer_id=800901
+drc_sms_prefix=【东莞农商】
+drc_sms_verify_code_msg_template=齐治堡垒机验证码为 {code}，请妥善保管。
+drc_sms_emp_passwd_msg_template=齐治堡垒机临时登录密码为 {code} ，单次有效，请妥善保管。
+ 
+增加开启soap参数，并重启tomcat
+message.soap.enable=true
+ 
+sms_soap文件上传至后台
+cp -a sms_soap /usr/libexec/shterm/
+chmod 755 /usr/libexec/shterm/sms_soap
+ 
+# 默认参数与值写入/etc/shterm/shterm.conf中，指定参数名为drc_sms_url、drc_sms_service_code、drc_sms_service_scene、drc_sms_service_version、drc_sms_cunsumer_id、drc_sms_prefix、drc_sms_verify_code_msg_template,drc_sms_temp_passwd_msg_template
+# 参数说明：
+drc_sms_url 接口地址【必传】，含协议，如http://10.2.172.41:5000/sms_gateway
+drc_sms_service_code 边车系统【必传】 服务代码，如11002000003
+drc_sms_service_scene 边车系统【必传】 服务场景，如02
+drc_sms_service_version 边车系统【必传】 服务版本，如01
+drc_sms_cunsumer_id 边车系统【必传】  请求系统编号，如800901
+drc_sms_prefix 短信前缀，如【东莞农商】(可选，不传时为空)
+drc_verify_code_msg_template 验证码短信模板【可选】，如齐治堡垒机验证码为 {code}，请妥善保管 ==>支持传入 {code} 参数，进行替换 （可选，不传则为左边示例内容）
+drc_sms_temp_passwd_msg_template 忘记密码时的临时密码短信模板【可选】，如齐治堡垒机临时登录密码为 {code}，一次性有效，请妥善保管。==>支持传入 {code} 参数，进行替换（可选，不传则为左边示例内容）
+"""
+def get_config_value(config_file, key_word):
+    """获取配置文件中的值"""
+    cmd = "cat {0} | grep {1} | awk -F '=' '{{print $2}}'".format(config_file, key_word)
+    return os.popen(cmd).read().strip()
+ 
+def get_sms_config():
+    config_file = "/etc/shterm/shterm.conf"
+    key_words = {
+        'url': "drc_sms_url",
+        'service_code': "drc_sms_service_code",
+        'service_scene': "drc_sms_service_scene",
+        'service_version': "drc_sms_service_version",
+        'consumer_id' : "drc_sms_consumer_id",
+        'prefix': "drc_sms_prefix",
+        'msg_verify_code_msg_template': "drc_sms_verify_code_msg_template",
+        'msg_temp_passwd_msg_template': "drc_sms_emp_passwd_msg_template"
+    }
+    settings = {}
+    try:
+        for key, key_word in key_words.items():
+            settings[key] = get_config_value(config_file, key_word)
+            #print(settings[key])
+    except Exception as e:
+        raise Exception("从配置文件 {0} 中获取sms配置参数时时发生异常，详情为 {1}".format(config_file, str(e)))
+    return settings
+ 
+#发送短信
+def send_sms(config):
+    try:
+        # 提取配置信息
+        settings = get_sms_config()
+        url = settings['url']
+        service_code = settings['service_code']
+        service_scene = settings['service_scene']
+        service_version = settings['service_version']
+        consumer_id = settings['consumer_id']
+        prefix = settings['prefix']
+        msg_verify_code_msg_template = settings['msg_verify_code_msg_template']
+        msg_temp_passwd_msg_template = settings['msg_temp_passwd_msg_template']
+        # 判断关键参数，是否传了，没有传则抛错
+        if url == '' or service_code == '' or service_scene == '' or service_version == '' or consumer_id == '':
+            msg = "The following parameters are not configured in /etc/shterm/shterm.conf. Please check: drc_sms_url, drc_sms_service_code, drc_sms_service_scene, drc_sms_service_version, drc_sms_cunsumer_id."
+            raise Exception(msg)
+ 
+        mobile = config.get('mobile','')
+        content = config.get('content','')
+        method = "POST"
+        # 判断content类型，如为6位验证码，则增加前缀和内容，进行替换
+        if len(content) == 6 and content.isdigit():
+            content = set_verify_code_msg(sms_prefix=prefix,content=content,msg_verify_code_msg_template=msg_verify_code_msg_template)
+        # 判断是否为临时密码格式，替换内容
+        elif content.startswith("$SHTERM_USER_TOTP"):
+            content = set_temp_passwd_msg(sms_prefix=prefix,content=content,msg_temp_passwd_msg_template=msg_temp_passwd_msg_template)
+        # 其他通知短信
+        else:
+            content = set_normal_msg(sms_prefix=prefix,content=content)
+        # 默认传参body模板
+        default_body = {
+    "APP_HEAD": {},
+    "SYS_HEAD": {
+        "SERVICE_CODE": service_code,
+        "SERVICE_SCENE": service_scene,
+        "SERVICE_VERSION": service_version,
+        "CONSUMER_ID": consumer_id,
+        "TRAN_TIMESTAMP":"",
+        "TRAN_DATE":"",
+        "CONSUMER_SEQ_NO":""
+    },
+    "BODY": {
+        "PHONE_ARRAY": [
+            {
+                "PHONE_NO": ""
+            }
+        ],
+        "TEMPLATE_PARA_ARRAY": [
+            {
+                "PARA_VALUE": ""
+            }
+        ],
+        "NOTICE_MODE": "0",
+        "BATCH_FLAG": "0"
+    }
+}
+         
+        # 获取当前时间和日期、时间戳作为唯一值
+        current_time = datetime.now().strftime('%H%M%S')
+        current_date = datetime.now().strftime('%Y%m%d')
+        current_datetime = datetime.now().strftime('%Y%m%d%H%M%S%f') #精确到毫秒级作为唯一值
+ 
+        # 构建请求数据，添加当前时间戳和日期
+        data = {
+            "APP_HEAD": default_body.get('APP_HEAD', {}),
+            "SYS_HEAD": default_body.get('SYS_HEAD', {}),
+            "BODY": default_body.get('BODY', {})
+        }
+        data['SYS_HEAD']['TRAN_TIMESTAMP'] = current_time
+        data['SYS_HEAD']['TRAN_DATE'] = current_date
+        data['SYS_HEAD']['CONSUMER_SEQ_NO'] = current_datetime
+        data['BODY']['PHONE_ARRAY'] = [{ "PHONE_NO": mobile }]
+        data['BODY']['TEMPLATE_PARA_ARRAY'] = [ {'PARA_VALUE' : content }]
+        # 发送请求
+        if method == 'POST':
+            response = requests.post(url, json=data)
+            # 增加成功判断
+            if response.status_code == 200:
+                res_json = response.json()
+                res_sys_head =  res_json.get('SYS_HEAD',{})
+                res_sys_head_ret = res_sys_head.get('RET',{})
+                send_tag = res_sys_head_ret[0].get('RET_CODE',"")
+                send_status = res_sys_head.get("RET_STATUS","")
+                if send_tag == "000000" and send_status == "S":
+                    return response.text
+                else:
+                    raise Exception(u"RET_CODE is {0},RET_STATUS is {1},response details is {2}".format(send_tag,send_status,response.text))
+            else:
+                raise Exception(u"http code is {0},response is {1}".format(response.status_code,response.text))
+        else:
+            raise Exception(u"http methon {0} is not support".format(method))
+ 
+    except Exception as e:
+        raise Exception(u"send sms failed,details is {0}".format(str(e)))
+ 
+if __name__ == '__main__':
+        if len(sys.argv) < 2:   
+            # 调试脚本时，使用以下参数进行测试(一般通知)
+            #config = {u'mobile': u'13570679513', u'DEBUG': True, u'content': u'通知短信发送测试', u'enabled': True}
+            # 验证码
+            #config = {u'mobile': u'13570679513', u'DEBUG': True, u'content': u'123456', u'enabled': True}
+            # 临时密码
+            config = {u'mobile': u'13570679513', u'DEBUG': True, u'content': u'$SHTERM_USER_TOTP:f6155403-d1ed-4503-88c4-9cd230078e79', u'enabled': True}
+        else:
+            encoded_config = sys.argv[1]
+            # 解码配置
+            decoded_config = base64.b64decode(encoded_config)
+            config = json.loads(decoded_config)
+    #    print "解码后内容为 %s" % config
+        result = send_sms(config)
+     #   print(result)
