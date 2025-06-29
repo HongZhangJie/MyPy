@@ -1,4 +1,4 @@
-name: PAM Password Test pam-final-03
+name: PAM Password Test pam-final-04
 
 on:
   workflow_dispatch:
@@ -25,10 +25,11 @@ jobs:
           $id = "${{ secrets.ACCESS_KEY_ID }}"
           $secret = "${{ secrets.ACCESS_KEY_SECRET }}"
           Write-Host "ID: $id"
-          Write-Host "SECRET: $secret"
+          Write-Host "Secret: $secret"
           $output = & python get_password.py "$id" "$secret"
           echo "PAM_JSON=$output" | Out-File -FilePath $Env:GITHUB_ENV -Append
         shell: powershell
+
 
       - name: Show PAM output
         run: |
