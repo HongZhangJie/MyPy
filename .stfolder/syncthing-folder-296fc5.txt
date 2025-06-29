@@ -1,0 +1,5 @@
+# This directory is a Syncthing folder marker.
+# Do not delete.
+
+folderID: fs7ji-rssyk
+created: 2025-06-12T17:53:58+08:00
