@@ -1,0 +1,37 @@
+name: Demo Git on Windows Self-Hosted Runner
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  demo-git-job:
+    runs-on:
+      - self-hosted
+      - windows
+
+    steps:
+      # Step 1: 打印机器信息
+      - name: Show runner info
+        run: |
+          echo "OS Version:"
+          systeminfo | findstr /B /C:"OS"
+
+      # Step 2: 克隆一个仓库（这里以你自己的仓库为例）
+      - name: Clone repo
+        run: |
+          git clone https://github.com/HongZhangJie/MyPy.git
+        shell: powershell
+
+      # Step 3: 进入目录拉取最新
+      - name: Pull latest
+        run: |
+          cd MyPy
+          git pull
+        shell: powershell
+
+      # Step 4: 查看最近 5 条 commit
+      - name: Show git log
+        run: |
+          cd MyPy
+          git log -5 --oneline
+        shell: powershell
