@@ -17,10 +17,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: master 
+          ref: master
 
       - name: Show Python version
         run: python --version
+        shell: powershell
+
+      - name: Debug: show script content
+        run: Get-Content .\get_password.py
         shell: powershell
 
       - name: Get PAM password (API)
