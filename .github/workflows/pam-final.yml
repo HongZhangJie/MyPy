@@ -1,8 +1,4 @@
-
-
-name: PAM Password Test pam-final
-
-
+name: PAM Password Test pam-final-01
 
 on:
   workflow_dispatch:
@@ -13,15 +9,11 @@ jobs:
       - self-hosted
       - windows
 
-    env:
-      ACCESS_KEY_ID: ${{ secrets.ACCESS_KEY_ID }}
-      ACCESS_KEY_SECRET: ${{ secrets.ACCESS_KEY_SECRET }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: master 
+          ref: master
 
       - name: Show Python version
         run: python --version
@@ -30,6 +22,8 @@ jobs:
       - name: Get PAM password (API)
         id: get_pam
         run: |
+          $Env:ACCESS_KEY_ID = "${{ secrets.ACCESS_KEY_ID }}"
+          $Env:ACCESS_KEY_SECRET = "${{ secrets.ACCESS_KEY_SECRET }}"
           $output = python get_password.py
           echo "PAM_JSON=$output" | Out-File -FilePath $Env:GITHUB_ENV -Append
         shell: powershell
