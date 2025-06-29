@@ -24,7 +24,9 @@ jobs:
         run: |
           $id = "${{ secrets.ACCESS_KEY_ID }}"
           $secret = "${{ secrets.ACCESS_KEY_SECRET }}"
-          $output = python get_password.py $id $secret
+          Write-Host "ID: $id"
+          Write-Host "SECRET: $secret"
+          $output = & python get_password.py "$id" "$secret"
           echo "PAM_JSON=$output" | Out-File -FilePath $Env:GITHUB_ENV -Append
         shell: powershell
 
