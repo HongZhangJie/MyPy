@@ -1,0 +1,38 @@
+name: PAM Password Test pam-final-05
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pam-test:
+    runs-on:
+      - self-hosted
+      - windows
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Show Python version
+        run: python --version
+        shell: powershell
+
+      - name: Get PAM password (API)
+        id: get_pam
+        run: |
+          $id = "${{ secrets.ACCESS_KEY_ID }}"
+          $secret = "${{ secrets.ACCESS_KEY_SECRET }}"
+          Write-Host "ID: $id"
+          Write-Host "Secret: $secret"
+          $output = & python get_password.py "$id" "$secret"
+          echo "PAM_JSON=$output" | Out-File -FilePath $Env:GITHUB_ENV -Append
+        shell: powershell
+
+
+      - name: Show PAM output
+        run: |
+          echo "This is the raw output:"
+          echo $Env:PAM_JSON
+        shell: powershell
