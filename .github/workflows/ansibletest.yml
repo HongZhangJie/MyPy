@@ -1,0 +1,23 @@
+---
+- hosts: all
+  gather_facts: no
+
+  vars:
+    pam_json: ""
+
+  tasks:
+    - name: Parse PAM JSON
+      set_fact:
+        pam_data: "{{ pam_json | from_json }}"
+
+    - name: Debug show parsed values
+      debug:
+        msg: |
+          User: {{ pam_data.objectName }}
+          Password: {{ pam_data.objectContent }}
+
+    - name: Run echo hello on target host
+      ansible.builtin.shell: echo "hello"
+      vars:
+        ansible_user: "{{ pam_data.objectName }}"
+        ansible_ssh_pass: "{{ pam_data.objectContent }}"
